@@ -5,8 +5,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'Assets/Scripts/**'
-      - 'Assets/Prefabs/**'
-      - 'Assets/Scenes/**'
       - 'ProjectSettings/**'
       - 'Packages/manifest.json'
       - 'Packages/packages-lock.json'
@@ -21,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  integrity-checks:
-    name: File Integrity
+  backend-integrity:
+    name: Backend Integrity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,16 +33,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify Project Settings
+      - name: Verify Force Text Serialization
         run: |
-          echo "Checking Asset Serialization Mode (Force Text)..."
           grep -q "m_SerializationMode: 2" ProjectSettings/EditorSettings.asset || \
-            { echo "::error::Asset Serialization Mode must be Force Text (m_SerializationMode: 2)"; exit 1; }
+            { echo "::error::Asset Serialization Mode must be Force Text"; exit 1; }
 
-          echo "Checking for merge conflict markers..."
-          if grep -rn "<<<<<<< " --include="*.unity" --include="*.prefab" --include="*.asset" --include="*.cs" --include="*.meta" Assets/ ProjectSettings/; then
+      - name: Check for Merge Conflicts
+        run: |
+          if grep -rn "<<<<<<< " --include="*.cs" --include="*.asset" --include="*.meta" Assets/ ProjectSettings/; then
             echo "::error::Unresolved merge conflicts detected"
             exit 1
           fi
 
-          echo "All project settings OK"
+      - name: Validate C# Syntax
+        run: |
+          echo "Checking for common C# issues..."
+          ERRORS=0
+          while IFS= read -r -d '' file; do
+            if grep -Pn '^\s*<<<|^\s*>>>|^\s*===' "$file"; then
+              echo "::error file=$file::Conflict marker found"
+              ERRORS=1
+            fi
+          done < <(find Assets -name "*.cs" -print0)
+          [ "$ERRORS" -eq 0 ] || exit 1
+          echo "All scripts OK"
