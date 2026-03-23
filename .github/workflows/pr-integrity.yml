@@ -1,0 +1,54 @@
+name: PR Integrity
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'Assets/**'
+      - 'ProjectSettings/**'
+      - 'Packages/**'
+      - '.github/workflows/pr-integrity.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    name: Project Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Meta File Check
+        uses: DeNA/unity-meta-check@v3
+        with:
+          enable_pr_comment: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Force Text Serialization
+        run: |
+          grep -q "m_SerializationMode: 2" ProjectSettings/EditorSettings.asset || \
+            { echo "::error::Asset Serialization Mode must be Force Text"; exit 1; }
+
+      - name: Verify Build Scenes Exist
+        run: |
+          grep -oP "path: \K.*" ProjectSettings/EditorBuildSettings.asset | while read -r scene; do
+            if [ ! -f "$scene" ]; then
+              echo "::error::Scene in Build Settings not found: $scene"
+              exit 1
+            fi
+          done
+
+      - name: Check for Merge Conflicts
+        run: |
+          if grep -rn "<<<<<<< " --include="*.cs" --include="*.unity" --include="*.prefab" --include="*.asset" --include="*.meta" Assets/ ProjectSettings/; then
+            echo "::error::Unresolved merge conflicts detected"
+            exit 1
+          fi
